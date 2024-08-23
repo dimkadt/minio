@@ -41,12 +41,32 @@ nodes:
   count: ${settings.nodes}
   cloudlets: 16
   nodeGroup: cp
-  image: devbeta.d.jele.io/minio:RELEASE.2024-07-16T23-46-41Z-almalinux-9
+  image: ${settings.image}
   password: ${globals.secretKey}
   skipNodeEmails: true
   validation:
       maxCount: ${settings.nodes}
       minCount: ${settings.nodes}
+
+onBeforeInit: |
+    function compareVersions(a, b) {a = a.split('.'), b = b.split('.'); for (var i = 0, l = Math.max(a.length, b.length); i < l; i++) {x = parseInt(a[i], 10) || 0; y = parseInt(b[i], 10) || 0; if (x != y) return x > y ? 1:-1 }; return 0;}
+    var settings = jps.settings;
+    var fields = settings.fields;
+    version = jelastic.system.service.GetVersion().version.split('-').shift()
+    image = compareVersions(version, '8.3') == -1 ? 'jelastic/minio:RELEASE.2023-02-27T18-10-45Z':'jelastic/minio:RELEASE.2024-07-16T23-46-41Z-almalinux-9'
+
+    return {
+      result: 0,
+      settings: {
+      fields: fields.concat([{
+        type: 'string',
+        caption: 'Base URL',
+        hidden: true,
+        name: 'image',
+        value: image
+      }])
+      }
+    };
 
 onInstall:
   - cmd[cp]: |-
