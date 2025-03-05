@@ -41,7 +41,7 @@ if (scriptAction != 'uninstall'){
 }
 
 //executing custom deployment hook script on cp nodes
-resp =  api.env.control.ExecCmdByGroup(envName, session, "cp", toJSON([{ command:'/bin/bash /root/' + scriptName}]), true);
+//resp =  api.env.control.ExecCmdByGroup(envName, session, "cp", toJSON([{ command:'/bin/bash /root/' + scriptName}]), true);
 if (resp.result != 0) return resp;
 
 if (scriptAction == 'install'){

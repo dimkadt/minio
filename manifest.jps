@@ -3,7 +3,7 @@ version: 1.5
 id: minio
 name: Minio Cluster
 homepage: https://github.com/jelastic-jps/minio
-baseUrl: https://raw.githubusercontent.com/jelastic-jps/minio/master
+baseUrl: https://raw.githubusercontent.com/dimkadt/minio/master
 logo: images/minio-logo-70x70.png
 
 categories: [ apps/file-manager ]
@@ -19,8 +19,8 @@ description:
 globals:
   accessKey: ${fn.password}
   secretKey: ${fn.password}
-  port: 80
-  consolePort: 4949
+  port: 8443
+  consolePort: 4848
   exportPath: /export
   DEPLOY_HOOK: /root/deployLE.sh
   UNDEPLOY_HOOK: /root/undeployLE.sh
@@ -57,6 +57,7 @@ settings:
       default: 4
       required: true
          
+ssl: true
 nodes:
   count: ${settings.nodes}
   cloudlets: 16
@@ -67,15 +68,6 @@ nodes:
   validation:
       maxCount: ${settings.nodes}
       minCount: ${settings.nodes}
-
-onAfterChangeTopology:
-  - if (${event.response.response.env.sslstate}):
-      cmd[cp]: nft insert rule ip nat PREROUTING ip saddr 0.0.0.0/0 ip daddr 0.0.0.0/0 tcp dport 80 counter redirect to 4949
-  - else:
-      cmd[cp]: |-
-        for REDIRECT_HANDLE in $(/usr/sbin/nft -a list table ip nat 2>&1 | grep 'redirect to 4949'| grep 'dport 80' | sed -r 's/.*#\s+handle\s+([0-9]+)/\1/g' 2>/dev/null); do
-            /usr/sbin/nft delete rule $ip_table nat PREROUTING handle $REDIRECT_HANDLE >>$JEM_CALLS_LOG 2>&1;
-        done
 
 onBeforeResetNodePassword[cp]:
   - setGlobals:
@@ -98,14 +90,15 @@ onInstall:
       rm -rf /${globals.exportPath}/.minio.sys
     user: root
   - cmd[cp]: |-
-      echo "MINIO_SERVER_URL=${env.protocol}://${env.domain}" >> /etc/default/minio
-      echo "MINIO_BROWSER_REDIRECT_URL=${env.protocol}://${env.domain}:4949" >> /etc/default/minio
+      echo "MINIO_SERVER_URL=${env.protocol}://${env.domain}:${globals.port}" >> /etc/default/minio
+      echo "MINIO_BROWSER_REDIRECT_URL=${env.protocol}://${env.domain}:${globals.consolePort}" >> /etc/default/minio
   - if (${settings.le-addon:false}): 
       - install-LE:
           skipEnvs: true
   - else:
-      - build-cluster
-      - restartContainers [cp]
+      - installCustomSSL
+  - build-cluster
+  - restartContainers [cp]
 
 actions:
   build-cluster:
@@ -116,25 +109,22 @@ actions:
       port: ${globals.port}
       consolePort: ${globals.consolePort}
 
+  installCustomSSL:
+    - cmd[${nodes.cp.master.id}]: |-
+        mkdir -p /var/lib/jelastic/keys/ /home/jelastic/.minio/certs/host/
+        cd /var/lib/jelastic/keys/
+        certgen -duration 87600h -host "${env.domain}" >/dev/null
+        mv -f private.key privkey.pem
+        mv -f public.crt fullchain.pem
+        touch /root/deployLE.sh
+    - script: ${globals.DEPLOY_HOOK_JS}
+      params:
+        envName: ${env.envName}
+        envDomain: ${env.domain}
+        action: install
+        nodeGroup: cp
+
   install-LE:
-    - setGlobals:
-          PROTOCOL: https
-    - cmd[cp]: |-
-        mkdir -p /home/jelastic/.minio/certs/host/
-        printf '#!/bin/bash
-        chown -R minio-user:minio-user /home/jelastic/.minio/
-        sed -i "/MINIO_VOLUMES/s|http:|https:|g" /etc/default/minio
-        sed -i "/MINIO_SERVER_URL/s|http:|https:|g" /etc/default/minio
-        sed -i "/MINIO_BROWSER_REDIRECT_URL/s|http:|https:|g" /etc/default/minio
-        sed -i "s|MINIO_OPTS=.*|MINIO_OPTS=\\" --address :443 --console-address :4949 --certs-dir /home/jelastic/.minio/certs\\"|g" /etc/default/minio
-        ' > ${globals.DEPLOY_HOOK}
-        
-        printf '#!/bin/bash
-        sed -i "/MINIO_VOLUMES/s|https:|http:|g" /etc/default/minio
-        sed -i "/MINIO_SERVER_URL/s|https:|http:|g" /etc/default/minio
-        sed -i "/MINIO_BROWSER_REDIRECT_URL/s|https:|http:|g" /etc/default/minio
-        sed -i "s|MINIO_OPTS=.*|MINIO_OPTS=\\" --address :80 --console-address :4949\\"|g" /etc/default/minio
-        ' > ${globals.UNDEPLOY_HOOK}
     - install:
       jps: https://raw.githubusercontent.com/jelastic-jps/lets-encrypt/master/manifest.jps?_r=${fn.random}
       nodeGroup: cp
@@ -144,8 +134,6 @@ actions:
         undeployHook: ${globals.DEPLOY_HOOK_JS}
         undeployHookType: js
         customDomains: ${env.domain}
-    - build-cluster
-    - restartContainers [cp]
 
 success:
   text: /text/success.md
